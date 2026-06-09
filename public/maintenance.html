@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Under Maintenance — ACHRAG</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; color: #e0d5c5; font-family: 'Courier New', monospace; overflow: hidden; width: 100vw; height: 100vh; }
+  #canvas-wrap { position: fixed; inset: 0; z-index: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #track-title {
+    position: fixed; top: 40px; left: 50%; transform: translateX(-50%);
+    font-size: clamp(0.8rem, 2vw, 1.1rem);
+    letter-spacing: 0.25em; color: rgba(201,169,110,0.85);
+    text-align: center; z-index: 10;
+    text-shadow: 0 0 20px rgba(201,169,110,0.4);
+    max-width: 80vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #maintenance-label {
+    position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%);
+    font-size: clamp(0.6rem, 1.5vw, 0.8rem);
+    letter-spacing: 0.4em; color: rgba(255,255,255,0.25);
+    text-align: center; z-index: 10; text-transform: uppercase;
+  }
+  #viz-switcher {
+    position: fixed; top: 40px; right: 30px; z-index: 10;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .viz-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(201,169,110,0.3);
+    color: rgba(201,169,110,0.6); font-size: 14px; cursor: pointer;
+    transition: all 0.2s; display: flex; align-items: center; justify-content: center;
+  }
+  .viz-btn:hover, .viz-btn.active { background: rgba(201,169,110,0.15); border-color: rgba(201,169,110,0.8); color: #c9a96e; }
+  #player {
+    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 16px; z-index: 10;
+    background: rgba(0,0,0,0.4); border: 1px solid rgba(201,169,110,0.2);
+    border-radius: 40px; padding: 10px 24px;
+    backdrop-filter: blur(10px);
+  }
+  .ctrl-btn {
+    background: none; border: none; color: rgba(201,169,110,0.7);
+    font-size: 18px; cursor: pointer; transition: color 0.2s; padding: 4px 6px; line-height: 1;
+  }
+  .ctrl-btn:hover { color: #c9a96e; }
+  .ctrl-btn.active { color: #e0c080; }
+  #progress-wrap {
+    width: clamp(80px, 20vw, 200px); height: 3px;
+    background: rgba(255,255,255,0.1); border-radius: 2px; cursor: pointer;
+  }
+  #progress-bar { height: 100%; background: rgba(201,169,110,0.6); border-radius: 2px; width: 0%; transition: width 0.5s linear; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="canvas-wrap"><canvas id="c"></canvas></div>
+<div id="track-title">—</div>
+<div id="maintenance-label">Under Maintenance</div>
+<div id="viz-switcher">
+  <button class="viz-btn active" data-viz="0" title="Particle Field">✦</button>
+  <button class="viz-btn" data-viz="1" title="Wave Rings">◎</button>
+  <button class="viz-btn" data-viz="2" title="Sacred Geometry">⬡</button>
+  <button class="viz-btn" data-viz="3" title="Aurora Nebula">☁</button>
+</div>
+<div id="player">
+  <button class="ctrl-btn" id="btn-shuffle" title="ランダム">⇌</button>
+  <button class="ctrl-btn" id="btn-prev" title="前の曲">⏮</button>
+  <button class="ctrl-btn" id="btn-play" title="再生/停止">▶</button>
+  <button class="ctrl-btn" id="btn-next" title="次の曲">⏭</button>
+  <button class="ctrl-btn" id="btn-repeat" title="リピート">↻</button>
+  <button class="ctrl-btn" id="btn-mute" title="ミュート">🔊</button>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const WORKER = "https://achrag-music-gate.igarikawa.workers.dev";
+const audio = new Audio();
+audio.crossOrigin = "anonymous";
+let TRACKS = [];
+let currentIdx = 0;
+let isShuffled = false;
+let repeatMode = 0;
+let isPlaying = false;
+let shuffleOrder = [];
+
+// トラック一覧取得（Referer自動付与でWorkerが認証）
+async function fetchTracks() {
+  try {
+    const r = await fetch(WORKER + "/tracks");
+    const d = await r.json();
+    TRACKS = d.tracks || [];
+    shuffleOrder = [...Array(TRACKS.length).keys()];
+    if (TRACKS.length > 0) loadTrack(0);
+  } catch(e) { console.warn("tracks fetch failed", e); }
+}
+
+async function getSignedUrl(key) {
+  try {
+    const r = await fetch(WORKER + "/token/" + encodeURIComponent(key));
+    const d = await r.json();
+    return WORKER + d.url;
+  } catch(e) { return null; }
+}
+
+async function loadTrack(idx) {
+  currentIdx = idx;
+  const t = TRACKS[idx];
+  if (!t) return;
+  document.getElementById('track-title').textContent = t.title;
+  const url = await getSignedUrl(t.key);
+  if (!url) return;
+  audio.src = url;
+  if (isPlaying) audio.play().catch(()=>{});
+}
+
+function playNext() {
+  if (repeatMode === 2) { audio.currentTime = 0; audio.play(); return; }
+  if (isShuffled) {
+    const pos = shuffleOrder.indexOf(currentIdx);
+    loadTrack(shuffleOrder[(pos + 1) % shuffleOrder.length]);
+  } else {
+    loadTrack((currentIdx + 1) % TRACKS.length);
+  }
+}
+function playPrev() {
+  if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+  if (isShuffled) {
+    const pos = shuffleOrder.indexOf(currentIdx);
+    loadTrack(shuffleOrder[(pos - 1 + shuffleOrder.length) % shuffleOrder.length]);
+  } else {
+    loadTrack((currentIdx - 1 + TRACKS.length) % TRACKS.length);
+  }
+}
+
+audio.addEventListener('ended', () => { if (repeatMode === 2) { audio.play(); } else { playNext(); } });
+audio.addEventListener('timeupdate', () => {
+  if (audio.duration) document.getElementById('progress-bar').style.width = (audio.currentTime / audio.duration * 100) + '%';
+});
+
+document.getElementById('btn-play').addEventListener('click', () => {
+  if (isPlaying) { audio.pause(); isPlaying = false; document.getElementById('btn-play').textContent = '▶'; }
+  else { audio.play().catch(()=>{}); isPlaying = true; document.getElementById('btn-play').textContent = '⏸'; }
+});
+document.getElementById('btn-next').addEventListener('click', playNext);
+document.getElementById('btn-prev').addEventListener('click', playPrev);
+document.getElementById('btn-shuffle').addEventListener('click', () => {
+  isShuffled = !isShuffled;
+  if (isShuffled) { for(let i=shuffleOrder.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffleOrder[i],shuffleOrder[j]]=[shuffleOrder[j],shuffleOrder[i]];} }
+  document.getElementById('btn-shuffle').classList.toggle('active', isShuffled);
+});
+document.getElementById('btn-repeat').addEventListener('click', () => {
+  repeatMode = (repeatMode + 1) % 3;
+  const btn = document.getElementById('btn-repeat');
+  btn.textContent = ['↻','↻¹','↺'][repeatMode];
+  btn.classList.toggle('active', repeatMode > 0);
+});
+document.getElementById('btn-mute').addEventListener('click', () => {
+  audio.muted = !audio.muted;
+  document.getElementById('btn-mute').textContent = audio.muted ? '🔇' : '🔊';
+  document.getElementById('btn-mute').classList.toggle('active', audio.muted);
+});
+document.getElementById('progress-wrap').addEventListener('click', e => {
+  const r = e.currentTarget.getBoundingClientRect();
+  audio.currentTime = (e.clientX - r.left) / r.width * audio.duration;
+});
+document.body.addEventListener('click', () => {
+  if (!isPlaying && TRACKS.length > 0) { audio.play().catch(()=>{}); isPlaying = true; document.getElementById('btn-play').textContent = '⏸'; }
+}, { once: true });
+
+fetchTracks();
+
+// ── Three.js ─────────────────────────────────────
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 1000);
+camera.position.z = 5;
+let currentViz = 0, vizObjects = [];
+const clock = new THREE.Clock();
+let analyser, dataArray;
+try {
+  const ctx = new (window.AudioContext||window.webkitAudioContext)();
+  const src = ctx.createMediaElementSource(audio);
+  analyser = ctx.createAnalyser(); analyser.fftSize = 128;
+  src.connect(analyser); analyser.connect(ctx.destination);
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
+} catch(e) {}
+function getAudioLevel() {
+  if (!analyser) return 0;
+  analyser.getByteFrequencyData(dataArray);
+  return dataArray.reduce((a,b)=>a+b,0)/dataArray.length/255;
+}
+function buildParticleField() {
+  const N=3000, geo=new THREE.BufferGeometry();
+  const pos=new Float32Array(N*3), col=new Float32Array(N*3);
+  for(let i=0;i<N;i++){pos[i*3]=(Math.random()-.5)*14;pos[i*3+1]=(Math.random()-.5)*14;pos[i*3+2]=(Math.random()-.5)*14;const g=.4+Math.random()*.6;col[i*3]=.78*g;col[i*3+1]=.66*g;col[i*3+2]=.43*g;}
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const mat=new THREE.PointsMaterial({size:.04,vertexColors:true,transparent:true,opacity:.8});
+  const pts=new THREE.Points(geo,mat);scene.add(pts);return{pts,origPos:pos.slice()};
+}
+function buildWaveRings() {
+  const group=new THREE.Group(),rings=[];
+  for(let r=0;r<8;r++){const geo=new THREE.TorusGeometry(.5+r*.4,.008,8,120);const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(`hsl(${40+r*8},60%,${30+r*5}%)`),transparent:true,opacity:.6});const mesh=new THREE.Mesh(geo,mat);mesh.rotation.x=Math.random()*Math.PI;mesh.rotation.y=Math.random()*Math.PI;group.add(mesh);rings.push(mesh);}
+  scene.add(group);return{group,rings};
+}
+function buildSacredGeo() {
+  const group=new THREE.Group(),shapes=[];
+  [new THREE.OctahedronGeometry(1.2,0),new THREE.IcosahedronGeometry(1.0,0),new THREE.TetrahedronGeometry(.8,0)].forEach((geo,i)=>{const mat=new THREE.MeshBasicMaterial({color:new THREE.Color(`hsl(${45+i*15},70%,50%)`),wireframe:true,transparent:true,opacity:.5});const mesh=new THREE.Mesh(geo,mat);group.add(mesh);shapes.push(mesh);});
+  scene.add(group);return{group,shapes};
+}
+function buildAurora() {
+  const N=5000,geo=new THREE.BufferGeometry();
+  const pos=new Float32Array(N*3),col=new Float32Array(N*3);
+  for(let i=0;i<N;i++){const theta=Math.random()*Math.PI*2,r=1.5+(Math.random()-.5)*4,y=(Math.random()-.5)*6;pos[i*3]=Math.cos(theta)*r;pos[i*3+1]=y;pos[i*3+2]=Math.sin(theta)*r;const c=new THREE.Color().setHSL(.55+Math.random()*.25,.8,.4+Math.random()*.3);col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;}
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const mat=new THREE.PointsMaterial({size:.06,vertexColors:true,transparent:true,opacity:.7});
+  const pts=new THREE.Points(geo,mat);scene.add(pts);return{pts};
+}
+const builders=[buildParticleField,buildWaveRings,buildSacredGeo,buildAurora];
+function clearViz(){vizObjects.forEach(o=>{const obj=o.pts||o.group;if(obj)scene.remove(obj);});vizObjects=[];}
+function setViz(idx){clearViz();currentViz=idx;vizObjects=[builders[idx]()];document.querySelectorAll('.viz-btn').forEach((b,i)=>b.classList.toggle('active',i===idx));}
+document.querySelectorAll('.viz-btn').forEach(btn=>btn.addEventListener('click',()=>setViz(parseInt(btn.dataset.viz))));
+setViz(0);
+function animate(){
+  requestAnimationFrame(animate);
+  const t=clock.getElapsedTime(),lvl=getAudioLevel(),beat=1+lvl*2;
+  if(currentViz===0&&vizObjects[0]){const{pts,origPos}=vizObjects[0];const pos=pts.geometry.attributes.position.array;for(let i=0;i<pos.length;i+=3){pos[i]=origPos[i]+Math.sin(t*.3+origPos[i+1])*.3*beat;pos[i+1]=origPos[i+1]+Math.cos(t*.2+origPos[i])*.3*beat;pos[i+2]=origPos[i+2]+Math.sin(t*.25+origPos[i+2])*.2*beat;}pts.geometry.attributes.position.needsUpdate=true;pts.rotation.y=t*.05;}
+  if(currentViz===1&&vizObjects[0]){const{group,rings}=vizObjects[0];rings.forEach((r,i)=>{r.rotation.z=t*(.1+i*.03);r.rotation.x=t*(.07+i*.02);const s=1+Math.sin(t*2+i)*.05*beat;r.scale.set(s,s,s);});group.rotation.y=t*.1;}
+  if(currentViz===2&&vizObjects[0]){const{group,shapes}=vizObjects[0];shapes.forEach((s,i)=>{s.rotation.x=t*(.2+i*.1);s.rotation.y=t*(.15+i*.08);const sc=1+lvl*.4;s.scale.set(sc,sc,sc);});group.rotation.y=t*.05;}
+  if(currentViz===3&&vizObjects[0]){const{pts}=vizObjects[0];pts.rotation.y=t*.04;pts.rotation.x=Math.sin(t*.1)*.2;pts.material.opacity=.5+lvl*.5;}
+  renderer.render(scene,camera);
+}
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+renderer.setSize(innerWidth,innerHeight);
+animate();
+</script>
+</body>
+</html>
