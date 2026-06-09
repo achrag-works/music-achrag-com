@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  /* config options here */
-};
-
-export default nextConfig;
+  async redirects() {
+    return [
+      {
+        source: '/((?!maintenance.html).*)',
+        destination: '/maintenance.html',
+        permanent: false,
+      },
+    ]
+  },
+}
+export default nextConfig
