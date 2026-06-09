@@ -9,13 +9,28 @@
   body { background: #000; color: #e0d5c5; font-family: 'Courier New', monospace; overflow: hidden; width: 100vw; height: 100vh; }
   #canvas-wrap { position: fixed; inset: 0; z-index: 0; }
   canvas { display: block; width: 100%; height: 100%; }
-  #track-title {
-    position: fixed; top: 40px; left: 50%; transform: translateX(-50%);
-    font-size: clamp(0.8rem, 2vw, 1.1rem);
-    letter-spacing: 0.25em; color: rgba(201,169,110,0.85);
+  #header-area {
+    position: fixed; top: 30px; left: 50%; transform: translateX(-50%);
     text-align: center; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; gap: 0.6em;
+    max-width: 80vw;
+  }
+  #music-credit {
+    font-size: clamp(0.55rem, 1.2vw, 0.7rem);
+    letter-spacing: 0.2em; color: rgba(255,255,255,0.22);
+    white-space: nowrap;
+  }
+  #track-title {
+    font-size: clamp(0.8rem, 2vw, 1.05rem);
+    letter-spacing: 0.2em; color: rgba(201,169,110,0.85);
     text-shadow: 0 0 20px rgba(201,169,110,0.4);
-    max-width: 80vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 80vw;
+  }
+  #now-playing-label {
+    color: rgba(150,190,255,0.7);
+    font-size: 0.85em;
+    letter-spacing: 0.15em;
   }
   #maintenance-label {
     position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%);
@@ -56,7 +71,10 @@
 </head>
 <body>
 <div id="canvas-wrap"><canvas id="c"></canvas></div>
-<div id="track-title">—</div>
+<div id="header-area">
+  <div id="music-credit">Music selected and provided by ACHRAG Sacred Resonance Division.</div>
+  <div id="track-title"><span id="now-playing-label">Now Playing</span>&nbsp;&nbsp;<span id="track-name">—</span></div>
+</div>
 <div id="maintenance-label">Under Maintenance</div>
 <div id="viz-switcher">
   <button class="viz-btn active" data-viz="0" title="Particle Field">✦</button>
@@ -109,7 +127,7 @@ async function loadTrack(idx) {
   currentIdx = idx;
   const t = TRACKS[idx];
   if (!t) return;
-  document.getElementById('track-title').textContent = t.title;
+  document.getElementById('track-name').textContent = t.title;
   const url = await getSignedUrl(t.key);
   if (!url) return;
   audio.src = url;
